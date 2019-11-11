@@ -1,0 +1,178 @@
+<html>
+
+<head>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <script type="text/javascript">
+    google.charts.load("current", { packages: ["corechart"] });
+    google.charts.setOnLoadCallback(drawChart);
+    function drawChart() {
+      var q = encodeURIComponent('SELECT  B');
+      var query = new google.visualization.Query(
+        'https://docs.google.com/spreadsheets/d/1akkqLVpGZKDkhmLNXO-17SDaif9dUp3oYphr2q1s9Sc/gviz/tq?gid=0&headers=1&tq=' + q);
+      query.send(handleQueryResponse);
+    }
+
+    function handleQueryResponse(response) {
+      if (response.isError()) {
+        alert('Error in query: ' + response.getMessage() + ' ' + response.getDetailedMessage());
+        return;
+      }
+
+      var sheetData = response.getDataTable();
+      sortData(sheetData);
+
+      /*Incorrect Analysis Start*/
+      var minSal = Math.round(sheetData.wg[0].c[0].v);
+      var maxSal = Math.round(sheetData.wg[sheetData.wg.length - 1].c[0].v);
+      var average = Math.round(averageData(sheetData.wg));
+      var sd = Math.round(sdData(sheetData.wg));
+      var analysisWithOutliers = 'The salary data ranges from ' + minSal + ' to ' + maxSal + ' with average salary around ' + average +
+        ',plus or minus ' + sd;
+      var chart = new google.visualization.Histogram(document.getElementById('chart_div'));
+      chart.draw(sheetData, {title: analysisWithOutliers});
+      /*Incorrect Analysis End*/
+
+      /*Correct Analysis Start*/
+      var descriptiveAnalysis = analyzeData(sheetData);
+      minSal = Math.round(sheetData.wg[0].c[0].v);
+      maxSal = Math.round(sheetData.wg[sheetData.wg.length - 1].c[0].v);
+      average = Math.round(averageData(sheetData.wg));
+      sd = Math.round(sdData(sheetData.wg));
+
+      var upperOutliersLength = descriptiveAnalysis.upperOutliers.length;
+      var lowerOutlierVal = descriptiveAnalysis.lowerOutliers[0];
+      var q2 = descriptiveAnalysis.q2;
+      var range = (descriptiveAnalysis.q3 - descriptiveAnalysis.q1) / 2;
+
+      var lowerOutliersData = lowerOutlierVal ? 'Extreme Lower value of outlier goes around ' + Math.round(lowerOutlierVal) + '.' : '';
+      var upperOutlierDataData = upperOutliersLength ? 'There are ' + upperOutliersLength + ' extreme upper outliers with the peak outlier being ' +
+        descriptiveAnalysis.upperOutliers[upperOutliersLength - 1] + '.' : '';
+
+      var analysisWithCorrection = 'Mostly data ranges from ' + minSal + ' to ' + maxSal + ' with average salary around ' + average +
+        ', plus or minus ' + sd + '. ' + lowerOutliersData + upperOutlierDataData;
+
+      var chart2 = new google.visualization.Histogram(document.getElementById('chart_div2'));
+      chart2.draw(sheetData, { title: analysisWithCorrection });
+      /*Correct Analysis End*/
+
+
+    }
+    function sortData(sheetData) {
+      sheetData.wg.sort(function (obj1, obj2) {
+        return obj1.c[0].v - obj2.c[0].v
+      });
+    }
+
+    function analyzeData(sheetData) {
+      sortData(sheetData);
+      var data = sheetData.wg;
+      var Q1 = Quartile(data, 0.25);
+      var Q2 = Quartile(data, 0.50);
+      var Q3 = Quartile(data, 0.75);
+
+      //Inter quartile range
+      var IQR = Q3 - Q1;
+      //Lower Outer and Upper Outer fence to detect extreme outliers
+      //for mild outliers set the factor to 1.5 instead of 3
+      var lowerLimit = Q1 - 3 * IQR;
+      var upperLimit = Q3 + 3 * IQR;
+      var lowerOutliers = []
+      var upperOutliers = [];
+      var upperAdjacentValue = Q3, lowerAdjacentValue = Q1;
+
+      for (var i = 0; i < data.length; i++) {
+        var val = data[i].c[0].v;
+        //if element is outside lower and upper fence
+        if (val < lowerLimit || val > upperLimit) {
+          if (val < lowerLimit) {
+            lowerOutliers.push(val);
+          } else {
+            upperOutliers.push(val)
+          }
+          data.splice(i, 1)
+          i--;
+        } else {
+          //all positive cases
+          if (val < Q1 && val >= lowerLimit) {
+            if (val < lowerAdjacentValue) {
+              lowerAdjacentValue = val;
+            }
+          } else if (val > Q3 && val <= upperLimit) {
+            if (val > upperAdjacentValue) {
+              upperAdjacentValue = val;
+            }
+          }
+        }
+      }
+
+      return {
+        data: data, q1: Q1, q2: Q2, q3: Q3, iqr: IQR,
+        lowerAdjacentValue: lowerLimit, upperAdjacentValue: upperAdjacentValue,
+        lowerOutliers: lowerOutliers, upperOutliers: upperOutliers
+      }
+    }
+
+    //The function expects data to be sorted
+    function Quartile(data, q) {
+      var pos = ((data.length) - 1) * q;
+      var base = Math.floor(pos);
+      var rest = pos - base;
+      if ((data[base + 1] !== undefined)) {
+        return data[base].c[0].v + rest * (data[base + 1].c[0].v - data[base].c[0].v);
+      } else {
+        return data[base].c[0].v;
+      }
+    }
+    function sumOfData(t) {
+      return t.reduce(function (a, b) {
+        return a + b.c[0].v;
+      },
+        0);
+    }
+
+    function averageData(data) {
+      var sum = sumOfData(data);
+      return sum / data.length;
+    }
+
+    function sdData(tab) {
+      var diffSqredArr = [];
+      var mean = averageData(tab);
+      for (j = 0; j < tab.length; j += 1) {
+        diffSqredArr.push(Math.pow((tab[j].c[0].v - mean), 2));
+      }
+      return (Math.sqrt(diffSqredArr.reduce(function (firstEl, nextEl) {
+        return firstEl + nextEl;
+      }) / tab.length));
+    }
+  </script>
+  <style>
+    h2 {
+      text-align: center;
+      background: #f0f0f0;
+      padding: 10px;
+      font-family: sans-serif;
+      color: #3366cb;
+      border: 2px solid #ece8e8;
+      border-radius: 5px;
+    }
+    h4{
+      font-family:sans-serif;
+    }
+  </style>
+</head>
+
+<body>
+  
+  <h2>Correct Descriptive Analysis after processing Outliers</h2>
+  <div id="chart_div2" style="height: 500px;"></div>
+
+  <h2>Incorrect Descriptive Analysis</h2>
+  <div id="chart_div" style="height: 500px;"></div>
+  <h4><a href="https://twitter.com/apuravchauhan">Twitter: @apuravchauhan</a></h4>
+  <h4><a href="https://www.linkedin.com/in/apuravchauhan/">LinkedIn: apuravchauhan</a></h4>
+
+
+</body>
+
+</html>
